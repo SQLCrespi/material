@@ -1,0 +1,27 @@
+
+Import-Module Azurerm
+
+az login
+
+az account list --output table
+
+az account set --subscription "Microsoft Azure"
+
+#grupo de recursos
+az group create -l eastus -n Post666
+
+az group list -o table
+
+az postgres server list -g post666 -o table
+
+az postgres server create -g post666 -n meupgserver -l westus -u sqlcrespi -p PostgreSQL01 --performance-tier Basic --compute-units 50 --ssl-enforcement Disabled --version 9.6
+
+az postgres server list -g post666 -o table
+
+az postgres server firewall-rule list  -g post666 -s meupgserver -o table
+
+az postgres server firewall-rule create -g post666 -s meupgserver -n todosIps --start-ip-address 0.0.0.0 --end-ip-address 255.255.255.255
+
+az postgres server firewall-rule list  -g post666 -s meupgserver -o table
+
+az postgres server firewall-rule delete -n todosIps -g post666 -s meupgserver -y
