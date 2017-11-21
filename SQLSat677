@@ -1,0 +1,82 @@
+#Arquivo com os scripts de demos da Palestra do SQL Saturday 677 de Salvador
+#Arq00 - Setup
+#setup do ambiente
+#remove PWSH
+#Remove ODBC
+#Remove SQL Server
+#Remove Agent
+#Deleta Diretórios
+#! /bin/bash
+#yum remove powershell
+#yum remove unixODBC-utf16 unixODBC-utf16-devel
+yum remove mssql-server 
+yum remove mssql-agent
+rm /opt/mssql -rf
+#rm /opt/mssql-tools -rf
+#rm /data -rf
+
+#Arq01 - Instalação
+###INSTALAĆÃO ONLINE!!!
+#download do repositório para o RHEL
+curl https://packages.microsoft.com/config/rhel/7/mssql-server.repo > /etc/yum.repos.d/mssql-server.repo
+
+#mostar o conteúdo do repositório
+/etc/yum.repos.d/
+
+#Comando de instalacao
+sudo yum install -y mssql-server
+
+#configuracao
+sudo /opt/mssql/bin/mssql-conf setup
+
+#exibe o servico
+systemctl status mssql-server
+
+
+###INSTALACAO OFFLINE!!!
+#O pacote esta em Downloads
+
+yum install -y mssql-server-14.0.3006.16-3.x86_64.rpm
+
+#configura
+systemctl stop mssql-server
+cd /opt/mssql/bin
+./mssql-conf setup
+
+###Instalar o Agent
+cd /home/sqlcrespi/Downloads
+yum install -y mssql-server-agent-14.0.3006.16-3.x86_64.rpm
+
+#abre o firewall
+
+sudo firewall-cmd --zone=public --add-port=1433/tcp --permanent
+sudo firewall-cmd --reload
+
+
+###PARA Atualizar
+#autaliza o sql server
+sudo yum update mssql-server
+
+#cria diretorio para Dados
+sudo mkdir /tmp/data
+sudo chown mssql /tmp/data
+sudo chgrp mssql /tmp/data
+
+#Arq02 - Tools
+
+#instalar o Tools
+#yum install -y unixODBC-utf16-2.3.1-1.x86_64.rpm
+#yum install -y unixODBC-utf16-devel-2.3.1-1.x86_64.rpmd
+yum install -y msodbcsql-13.1.0.0-1.x86_64.rpm
+yum install -y mssql-tools-14.0.6.0-1.x86_64.rpm
+
+#Seta o diretorio 
+sudo /opt/mssql/bin/mssql-conf set filelocation.defaultdatadir /tmp/data
+sudo systemctl restart mssql-server
+sudo /opt/mssql/bin/mssql-conf set filelocation.defaultlogdir /tmp/log
+
+
+#restaurar o servico do SQL Server
+#Mostrar o SSMS com agent e os caminhos que foram alterados
+
+Para ver o slide desta palestra veja no link do meu blog em: https://sqlcrespi.com/2017/11/21/sql-saturday-677/
