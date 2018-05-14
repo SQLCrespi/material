@@ -1,0 +1,14 @@
+function Novo-ParametoIncializacao{
+  $instancia = Read-Host "Digite o nome da instância "
+
+  $caminho = "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\MSSQL14.SQLSERVER2017\" + $Instancia  + "\Parameters" 
+  Write-Host "Seus parâmetros de incialização são "
+  Get-ItemProperty $caminho 
+  $Nome = Read-Host "Digite o nome do novo parâmetro seguindo a sequência SQLArgx "
+  $Valor = Read-Host "Digite o Valor para este parâmetro "
+
+  $caminho = "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\MSSQL14.SQLSERVER2017\" + $Instancia  + "\Parameters" 
+  new-ItemProperty -path $caminho -Name $nome -Value $valor -PropertyType String -Force
+  Write-Host "Seus novos parâmetros de inicialização são "
+  Get-ItemProperty $caminho 
+}
