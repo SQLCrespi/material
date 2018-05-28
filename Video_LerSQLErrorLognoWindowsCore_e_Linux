@@ -1,0 +1,28 @@
+#Windows Server
+import-module sqlserver
+
+$crd = get-credential
+
+#com GUI
+get-sqlerrorlog -ServerInstance sqlcrespi -Credential $crd -Since Yesterday | Out-GridView
+
+#Sem GUI
+get-sqlerrorlog -ServerInstance sqlcrespi -Credential $crd -Since Yesterday | `
+ Where-Object {$_.Text -like "*login*"} `
+ |Format-Table
+
+
+#Do Windows 10 -> Consultando o Linux
+
+$crd = get-credential
+
+get-sqlerrorlog -ServerInstance 191.222.231.144 -Credential $crd  `
+| Out-GridView
+
+
+#Direto na Console do PS no Linux
+get-sqlerrorlog -ServerInstance lxrhe -Credential $crd -Since Yesterday  
+
+get-sqlerrorlog -ServerInstance lxrhe -Credential $crd -Since Yesterday | `
+ Where-Object {$_.Text -like "*login*"} `
+ |Format-Table
