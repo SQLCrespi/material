@@ -1,0 +1,22 @@
+$Credencial = Get-Credential
+
+try{ 
+Backup-DbaDatabase -SqlInstance sqlcrespi -Database 'aventureworks' -Type Log `
+    -CompressBackup -BackupDirectory C:\backup -BackupFileName advPS.bak -EnableException 
+
+
+Send-MailMessage -From sqlcrespi@outlook.com -To rodrigo@crespidb.com.br `
+    -Subject "Backup Concluído" -SmtpServer smtp-mail.outlook.com -Port 587 `
+    -Body "O Bakcup do Banco de Dados Adventureworks foi concluído" `
+    -Credential $Credencial -UseSsl
+}catch{
+   $ErrorMessage = $_.Exception.Message
+    $FailedItem = $_.Exception.ItemName
+    Write-Host "Erro"
+    Send-MailMessage -From sqlcrespi@outlook.com -To rodrigo@crespidb.com.br `
+        -Subject "Erro de backup" -SmtpServer smtp-mail.outlook.com -Port 587 `
+        -Body "Mensagem de erro:  $FailedItem - $ErrorMessage" `
+        -Credential $Credencial -UseSsl
+    break
+}
+
