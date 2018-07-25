@@ -1,0 +1,506 @@
+/*Demo 1 - Design, tipos, etc.
+Data da criação: 18/07/2018	
+Desenvolvedor: Rodrigo Crespi
+Objetivo: Padronização
+*/
+
+-- Ex 1
+-- Padrão de nomenclatura e padrão de codificação
+-- Abrir o arquivo 01-DesignB em outra guia - lembrar de mostrar o plano.
+USE TSQL;
+GO
+SELECT  firstname, lastname
+FROM    HR.Employees;
+GO
+SELECT  lastname
+, firstname
+FROM    HR.Employees;
+GO
+SELECT  firstname , lastname
+FROM    HR.Employees;
+GO
+
+-- Ex2
+-- Criar objetos em filegroups diferentes dos metadados
+USE master;
+GO
+DROP DATABASE IF EXISTS Design;
+GO
+CREATE DATABASE [Design] CONTAINMENT = NONE
+ON PRIMARY (NAME = N'Design', FILENAME = 'e:\sqldata\Design.mdf', SIZE = 1048576KB, FILEGROWTH = 0),
+   FILEGROUP [Cliente] (NAME = N'Design_Cliente', FILENAME = 'e:\sqldata\Design_Cliente.ndf', SIZE = 1048576KB,
+                        MAXSIZE = 1048576KB, FILEGROWTH = 126976KB)
+LOG ON (NAME = N'Design_log', FILENAME = 'e:\sqldata\Design_log.ldf', SIZE = 8192KB, FILEGROWTH = 65536KB);
+
+
+
+-- Ex3
+-- Padrão de nomenclatura
+--DROP dbo.cliente
+USE Design;
+GO
+CREATE TABLE dbo.Cliente -- ou dbo.AD_Cliente
+( id   INT          NOT NULL IDENTITY(1, 1),
+  nome VARCHAR(200) NOT NULL); -- Cliente -- ON PRIMARY
+
+GO
+
+-- Com Sugestão de Padrão
+CREATE SCHEMA Administrativo;
+GO
+-- drop table administrativo.cliente
+CREATE TABLE Administrativo.Cliente (cdcliente INT          NOT NULL IDENTITY(1, 1),
+                                     nmcliente VARCHAR(200) NOT NULL) ;
+GO
+CREATE USER [adm] WITHOUT LOGIN WITH DEFAULT_SCHEMA = [Administrativo];
+GO
+ALTER ROLE [db_owner] ADD MEMBER [adm];
+GO
+
+-- Ex 4.1
+-- Tipagem de dados e tamanhos
+
+CREATE SCHEMA Operacional;
+GO
+-- Não FAZER DESTA FORMA - Cuidado com os tipos de hora e data
+CREATE TABLE Operacional.CargaHora_NaoAssim (cdcargahora INT     NOT NULL IDENTITY(1, 1),
+                                             hrinicio    CHAR(5) NOT NULL,  --00:00
+                                             hrfim       CHAR(5) NOT NULL) ON Cliente;
+GO
+-- FAZER DESTA MANEIRA
+CREATE TABLE Operacional.CargaHora (cdcargahora INT  IDENTITY(1, 1) NOT NULL,
+                                    hrinicio    TIME NOT NULL,
+                                    hrfim       TIME NOT NULL) ON Cliente;
+GO
+
+-- Ex 4.2
+-- TIPO
+USE vendas;
+GO
+--Criar duas tabelas uma com data como char e outra com Datetime
+CREATE TABLE [dbo].[vendaTipoCerto] ([cdvenda]   [BIGINT]   IDENTITY(1, 1) NOT NULL,
+                                     [dtvenda]   [DATETIME] NOT NULL,
+                                     [cdcliente] [BIGINT]   NOT NULL,
+                                     [nrano]     [INT]      NOT NULL);
+GO
+CREATE TABLE [dbo].[vendaTipoErrado] ([cdvenda]   [BIGINT] IDENTITY(1, 1) NOT NULL,
+                                      [dtvenda]   CHAR(10) NOT NULL,
+                                      [cdcliente] [BIGINT] NOT NULL,
+                                      [nrano]     [INT]    NOT NULL);
+GO
+--Insere os registros da tabela venda
+INSERT INTO dbo.vendaTipoCerto (dtvenda, cdcliente, nrano)
+SELECT  dtvenda, cdcliente, nrano
+FROM    venda;
+GO
+INSERT INTO dbo.vendaTipoErrado (dtvenda, cdcliente, nrano)
+SELECT  dtvenda, cdcliente, nrano
+FROM    venda;
+GO
+
+--Limpa o Cache
+DBCC FREEPROCCACHE();
+--crtl + l
+SELECT  dtvenda, cdcliente, nrano
+FROM    dbo.vendaTipoCerto;
+SELECT  dtvenda, cdcliente, nrano
+FROM    dbo.vendaTipoErrado;
+
+-- Usar o tipo certo evita gambiarra!
+SELECT  dtvenda, cdcliente, nrano
+FROM    dbo.vendaTipoErrado
+WHERE   dtvenda
+BETWEEN '2015-01-01' AND '2018-12-31';
+GO
+SELECT  dtvenda, cdcliente, nrano
+FROM    dbo.vendaTipoCerto
+WHERE   dtvenda
+BETWEEN '2015-01-01' AND '2018-12-31';
+
+/*Demo 1/B - Suporte
+Data da criação: 18/07/2018	
+Desenvolvedor: Rodrigo Crespi
+Objetivo: Suporte... limpeza de cache, conteúdo ...
+*/
+
+
+--Limpa o cache
+CHECKPOINT;
+DBCC DROPCLEANBUFFERS;
+DBCC FREEPROCCACHE;
+
+--Conteúdo do cache
+SELECT    objtype AS "TipoNoCache", COUNT_BIG(*) "Total de Planos",
+          SUM(CAST(size_in_bytes AS DECIMAL(18, 2))) / 1024 / 1024 AS "Total MBs", AVG(usecounts) AS "MédiaUso",
+          SUM(CAST((CASE WHEN usecounts = 1 THEN size_in_bytes ELSE 0 END) AS DECIMAL(18, 2))) / 1024 / 1024 AS "Total MBs - use cont 1",
+          SUM(CASE WHEN usecounts = 1 THEN 1 ELSE 0 END) AS "Total de Planos - Use count 1"
+FROM      sys.dm_exec_cached_plans
+GROUP BY  objtype
+ORDER BY  [Total MBs - use cont 1] DESC;
+
+
+--Mostra as queries marcadas
+SELECT      CAST(total_elapsed_time / 1000000.0 AS DECIMAL(28, 2)) AS [Total Duration (s)],
+            CAST(total_worker_time * 100.0 / total_elapsed_time AS DECIMAL(28, 2)) AS [% CPU],
+            CAST((total_elapsed_time - total_worker_time) * 100.0 / total_elapsed_time AS DECIMAL(28, 2)) AS [% Waiting],
+            execution_count,
+            CAST(total_elapsed_time / 1000000.0 / execution_count AS DECIMAL(28, 2)) AS [Average Duration (s)],
+            SUBSTRING(qt.text,
+                      (qs.statement_start_offset / 2) + 1,
+                      ((CASE
+                          WHEN qs.statement_end_offset = -1 THEN
+                            LEN(CONVERT(NVARCHAR(MAX), qt.text)) * 2
+                          ELSE
+                            qs.statement_end_offset
+                        END - qs.statement_start_offset) / 2) + 1) AS [Individual Query],
+            SUBSTRING(qt.text, 1, 100) AS [Parent Query], DB_NAME(CAST(pa.value AS INT)) AS [Database]
+FROM        sys.dm_exec_query_stats qs
+CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) AS qt
+CROSS APPLY sys.dm_exec_plan_attributes(qs.plan_handle) AS pa
+WHERE       total_elapsed_time > 0
+            AND pa.attribute = 'dbid'
+            AND DB_NAME(CAST(pa.value AS INT)) = 'tsql'
+ORDER BY    total_elapsed_time DESC;
+
+/*Demo 2 - TSQL
+Data da criação: 19/07/2018	
+Desenvolvedor: Rodrigo Crespi
+Objetivo: Exemplos de TSQL
+*/
+
+-- Ex 1
+-- Evitar funções no Where da busca
+-- Exemplo com data
+USE TSQL;
+GO
+DROP TABLE IF EXISTS pedidos;
+--Criar uma cópia da tabela e mostrar que não tem índice.
+SELECT  orderid, custid, empid, orderdate
+INTO    pedidos
+FROM    Sales.Orders;
+GO
+SELECT  *
+FROM    sys.indexes
+WHERE   object_id = OBJECT_ID('pedidos');
+GO
+
+--Criar o indice para usar na data
+CREATE INDEX ixPedidoData ON pedidos (orderdate) INCLUDE (orderid);
+
+--Query (crtl + M)
+-- não utilizar funções no WHERE
+SELECT  orderid
+FROM    pedidos
+WHERE   DATEPART(YEAR, orderdate) = 2006
+        AND DATEPART(MONTH, orderdate) = 8;
+
+SELECT  orderid
+FROM    pedidos
+WHERE   orderdate
+BETWEEN '2006/08/01' AND '2006/08/31';
+
+--Só para deixar claro o BETWEEN ser mais rápido que o >= e o <= é mito
+SELECT  orderid
+FROM    pedidos
+WHERE   orderdate >= '2006/08/01'
+        AND orderdate <= '2006/08/31';
+
+-- Ex 1a Mais um detalhe. Agora sobre *indices*
+SELECT  orderid, custid
+FROM    pedidos
+WHERE   orderdate
+BETWEEN '2006/08/01' AND '2006/08/31';
+
+SELECT  orderid
+FROM    pedidos
+WHERE   orderdate
+BETWEEN '2006/08/01' AND '2006/08/31';
+
+--Porem
+CREATE CLUSTERED INDEX ic_Pedidos_orderid ON dbo.pedidos (orderid ASC);
+GO
+
+DBCC FREEPROCCACHE;
+--Testar novamente com o crtl+M
+SELECT  orderid, custid
+FROM    pedidos
+WHERE   orderdate
+BETWEEN '2006/08/01' AND '2006/08/31';
+
+SELECT  orderid
+FROM    pedidos
+WHERE   orderdate
+BETWEEN '2006/08/01' AND '2006/08/31';
+
+
+
+
+-- Ex2 LIKE
+USE TSQL;
+GO
+DROP TABLE IF EXISTS empregados;
+GO
+SELECT  empid, lastname, firstname, title, titleofcourtesy, birthdate, hiredate, address, city, region, postalcode,
+        country, phone, mgrid
+INTO    Empregados
+FROM    HR.Employees;
+GO
+SELECT  *
+FROM    sys.indexes
+WHERE   object_id = OBJECT_ID('empregados');
+SELECT  *
+FROM    sys.indexes
+WHERE   object_id = OBJECT_ID('hr.Employees');
+GO
+-- Criar Indice
+CREATE INDEX ix_empregadolastname
+  ON Empregados (lastname)
+  INCLUDE
+(empid,
+ firstname,
+ title,
+ titleofcourtesy,
+ birthdate,
+ hiredate,
+ address,
+ city,
+ region,
+ postalcode,
+ country,
+ phone,
+ mgrid
+);
+
+--DROP INDEX ix_empregadolastname ON dbo.Empregados
+
+GO
+DBCC FREEPROCCACHE;
+GO
+-- crtl + M (ver CPU index seek e do index scan)
+SELECT  empid, lastname, firstname, title, titleofcourtesy, birthdate, hiredate, address, city, region, postalcode,
+        country, phone, mgrid
+FROM    Empregados
+WHERE   lastname = 'Davis';
+SELECT  empid, lastname, firstname, title, titleofcourtesy, birthdate, hiredate, address, city, region, postalcode,
+        country, phone, mgrid
+FROM    Empregados
+WHERE   lastname LIKE '%avis';
+SELECT  empid, lastname, firstname, title, titleofcourtesy, birthdate, hiredate, address, city, region, postalcode,
+        country, phone, mgrid
+FROM    Empregados
+WHERE   lastname LIKE '_avis';
+SELECT  empid, lastname, firstname, title, titleofcourtesy, birthdate, hiredate, address, city, region, postalcode,
+        country, phone, mgrid
+FROM    Empregados
+WHERE   lastname LIKE 'Davi_';
+SELECT  empid, lastname, firstname, title, titleofcourtesy, birthdate, hiredate, address, city, region, postalcode,
+        country, phone, mgrid
+FROM    Empregados
+WHERE   lastname LIKE 'Davi%';
+
+
+-- Ex3 Funções de Calculo
+DROP TABLE IF EXISTS detalhepedido;
+DROP TABLE IF EXISTS detalhepedidocomp;
+DROP TABLE IF EXISTS detalhepedidocompper;
+GO
+--Cria as tabelas
+SELECT  orderid, productid, unitprice, qty, discount
+INTO    detalhepedido
+FROM    Sales.OrderDetails;
+SELECT  orderid, productid, unitprice, qty, discount
+INTO    detalhepedidocomp
+FROM    Sales.OrderDetails;
+SELECT  orderid, productid, unitprice, qty, discount
+INTO    detalhepedidocompper
+FROM    Sales.OrderDetails;
+
+DBCC FREEPROCCACHE;
+GO
+-- Como resolver a computacão do valor????
+SELECT  orderid, productid, unitprice, qty, discount, (unitprice * qty) AS total
+FROM    detalhepedido;
+
+
+--Assim!!!
+ALTER TABLE detalhepedidocomp ADD total AS (qty * unitprice);
+ALTER TABLE detalhepedidocompper ADD total AS (qty * unitprice) PERSISTED;
+GO
+DBCC FREEPROCCACHE;
+GO
+SELECT  orderid, productid, unitprice, qty, discount, (unitprice * qty) AS total
+FROM    detalhepedido;
+SELECT  orderid, productid, unitprice, qty, discount, total
+FROM    detalhepedidocomp;
+SELECT  orderid, productid, unitprice, qty, discount, total
+FROM    detalhepedidocompper;
+
+--Mas o persistido piorou? pq tem uma coluna a mais...
+
+CREATE INDEX ix_total ON detalhepedidocompper (total) INCLUDE (orderid);
+GO
+DBCC FREEPROCCACHE;
+GO
+SELECT  orderid, (unitprice * qty) AS total
+FROM    detalhepedido;
+SELECT  orderid, total
+FROM    detalhepedidocomp;
+SELECT  orderid, total
+FROM    detalhepedidocompper;
+
+-- Mas onde piora? (Não existe almoço grátis)
+--CRTL + L
+INSERT INTO [detalhepedido] ([orderid], [productid], [unitprice], [qty], [discount])
+VALUES (1000, 100, 10, 1, 3);
+INSERT INTO [detalhepedidocomp] ([orderid], [productid], [unitprice], [qty], [discount])
+VALUES (1000, 100, 10, 1, 3);
+INSERT INTO [detalhepedidocompper] ([orderid], [productid], [unitprice], [qty], [discount])
+VALUES (1000, 100, 10, 1, 3);
+
+
+
+-- Ex 4 * from 
+-- IMPORTANTE: SE TROCARMOS UMA COLUNA DE LUGAR, OU ADICIONARMOS OUTRA NA TABELA
+-- DEVEMOS PESQUISAR EM TODOS OS CÓDIGOS DO SISTEMA PROCURANDO ALTERAÇÕES;
+-- OUTRO EXEMPLO É A FALTA DE PADRÃO VISTO NO TÓPICO DESIGN ;)
+USE ExBlob;
+GO
+DBCC FREEPROCCACHE;
+GO
+--CRTL + l
+SELECT  *
+FROM    semblob.cliente;
+GO
+SELECT  id, nome, data
+FROM    comblob.cliente;
+
+
+-- Ex 5 Order by, or not, order by;
+USE TSQL;
+GO
+DBCC FREEPROCCACHE;
+--CRTL + M
+SELECT  empid, lastname, firstname, title, city
+FROM    Empregados;
+
+SELECT    empid, lastname, firstname, title, city
+FROM      Empregados
+ORDER BY  firstname, lastname;
+
+
+-- Mas e o índice?
+DROP INDEX if EXISTS [ic_empregado] ON [dbo].[Empregados] WITH ( ONLINE = OFF )
+DROP INDEX if EXISTS ix_empregados2 ON [dbo].[Empregados] WITH ( ONLINE = OFF )
+DROP INDEX if EXISTS ix_empregados ON [dbo].[Empregados] WITH ( ONLINE = OFF )
+
+CREATE INDEX ix_empregados ON Empregados (lastname, firstname);
+GO
+CREATE INDEX ix_empregados2 ON Empregados (firstname, lastname);
+GO
+DBCC FREEPROCCACHE;
+
+
+--CRTL + M
+SELECT  empid, lastname, firstname, title, city
+FROM    Empregados;
+
+SELECT    empid, lastname, firstname, title, city
+FROM      Empregados
+ORDER BY  firstname, lastname;
+
+-- Da para melhorar?
+-- o custo é o mesmo, mas nao estou mais fazendo um rid lookup
+CREATE CLUSTERED INDEX ic_empregados ON Empregados (empid);
+GO
+DBCC FREEPROCCACHE;
+
+
+--CRTL + M
+SELECT  empid, lastname, firstname, title, city
+FROM    Empregados;
+
+SELECT    empid, lastname, firstname, title, city
+FROM      Empregados
+ORDER BY  firstname, lastname;
+
+-- Melhor ainda seria ...
+-- Mas alguém pode fazer isso??? 
+DROP INDEX [ic_empregados] ON [dbo].[Empregados] WITH (ONLINE = OFF);
+GO
+CREATE CLUSTERED INDEX ic_empregados ON Empregados (firstname, lastname);
+GO
+DBCC FREEPROCCACHE;
+
+
+--CRTL + M
+SELECT  empid, lastname, firstname, title, city
+FROM    Empregados;
+
+SELECT    empid, lastname, firstname, title, city
+FROM      Empregados
+ORDER BY  firstname, lastname;
+
+/*Demo 1 - Performance
+Data da criação: 19/07/2018	
+Desenvolvedor: Rodrigo Crespi
+Objetivo: Dicas de Performance
+*/
+
+/* Importante: 
+ANTES DE TESTAR QUALQUER SITUAÇÃO DE PERFORMANCE LIMPAR OS CACHES
+SEMPRE UTILIZAR OS PLANOS DE EXECUÇÃO COMO GUIA PARA MEDIR A EVOLUÇÃO DA QUERY
+GUARDAR O PLANO DE EXECUÇÃO ORIGINAL PARA TER UMA BASE DE GANHO OU PERDA
+*/
+CHECKPOINT;
+DBCC FREEPROCCACHE
+GO
+SET STATISTICS IO ON
+SET STATISTICS TIME ON 
+go
+USE ExBlob
+go
+SELECT id, nome, f.foto, data FROM semblob.cliente c
+INNER JOIN semblob.foto f
+ON c.id = f.idcliente ORDER BY nome
+GO
+SET STATISTICS IO Off
+SET STATISTICS TIME Off
+--
+
+
+USE [ExBlob]
+GO
+ALTER TABLE [semblob].[foto] DROP CONSTRAINT [FK_foto_cliente]
+GO
+ALTER TABLE [semblob].[cliente] DROP CONSTRAINT [PK_cliente]
+GO
+DROP INDEX IF EXISTS [ix_semblobclientenome] ON [semblob].[cliente]
+GO
+DROP INDEX IF EXISTS [ix_semblobcliente] ON [semblob].[cliente]
+GO
+
+
+
+-- Como eu faço
+CHECKPOINT;
+DBCC FREEPROCCACHE
+--crtl + m
+SELECT id, nome, f.foto, data FROM semblob.cliente c
+INNER JOIN semblob.foto f
+ON c.id = f.idcliente ORDER BY nome
+--Salvar o plano
+
+--crtl + m
+CREATE CLUSTERED INDEX [ic_semblob] ON [semblob].[cliente]([nome] ASC )
+GO
+create index ix_smblobnome on semblob.cliente (id) include (nome)
+GO
+CHECKPOINT;
+DBCC FREEPROCCACHE
+GO
+
+
+GO
+SELECT id, nome, f.foto, data FROM semblob.cliente c
+INNER JOIN semblob.foto f
+ON c.id = f.idcliente ORDER BY nome
