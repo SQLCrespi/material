@@ -107,3 +107,96 @@ GO
 
 
 --Vídeo 2: material/video2_particionamentodetabelas 
+
+--Vídeo 2
+--
+--Partições
+--
+select * from sys.partitions 
+where object_id = object_id('venda')
+
+select * from sys.partition_schemes
+
+--Função, valor e schema
+select sys.partition_functions.name , sys.partition_range_values.* , sys.partition_schemes.name as name_scheme
+from sys.partition_functions
+inner join sys.partition_range_values on sys.partition_range_values.function_id = sys.partition_functions.function_id
+inner join sys.partition_schemes      on sys.partition_schemes.function_id      = sys.partition_functions.function_id
+
+--Schema e fileroup
+select sys.partition_schemes.name as name_scheme, sys.data_spaces.name as name_filegroup
+from sys.partition_schemes
+inner join sys.destination_data_spaces on sys.destination_data_spaces.partition_scheme_id = sys.partition_schemes.data_space_id
+inner join sys.data_spaces on sys.data_spaces.data_space_id = sys.destination_data_spaces.data_space_id
+
+
+--
+--Retorna o ID das partições
+--
+select $partition.pf_vendas(2013) v2013, $partition.pf_vendas(2014) as v2014, $partition.pf_vendas(2015) as v2015, $partition.pf_vendas(2016) as v2016
+
+--Registros da tabela
+select cdvenda, dtvenda, cdcliente as particao from venda
+where $partition.pf_vendas(nrano) = 4
+
+
+select cdvenda, dtvenda, cdcliente as particao from venda
+where nrano = 2016
+--
+-- Testando o insert
+insert into venda values( getdate(), 2, 2016) -- particao 4
+Go 
+insert into venda values('2013-08-22',2 , 2013) --particao 1
+go
+insert into venda values('2012-08-22',2,2012) --particao 1
+GO
+insert into venda values('2010-08-22',2,2010) -- particao 1
+
+
+
+--Vídeo 3
+
+--Merge mescla intervalos
+select count(*) from venda where $partition.pf_vendas(nrano) = 1
+select count(*) from venda where $partition.pf_vendas(nrano) = 2
+select count(*) from venda where $partition.pf_vendas(nrano) = 3
+select count(*) from venda where $partition.pf_vendas(nrano) = 4
+ALTER PARTITION FUNCTION PF_vendas() MERGE RANGE (2014) --neste caso os dados de 2014 e 2015 se mesclam na Particao 2
+select count(*) from venda where $partition.pf_vendas(nrano) = 1
+select count(*) from venda where $partition.pf_vendas(nrano) = 2
+select count(*) from venda where $partition.pf_vendas(nrano) = 3
+select count(*) from venda where $partition.pf_vendas(nrano) = 4
+
+
+--Split adiciona intervalo
+ALTER PARTITION SCHEME SH_Vendas NEXT USED FG2013;
+ALTER PARTITION FUNCTION PF_Vendas ()SPLIT RANGE (2014);
+
+
+--Switch - move dados de uma particao para outra do mesmo FG
+-- Exemplo para expurgo de dados
+USE [vendas]
+GO
+drop table historicovenda
+CREATE TABLE HistoricoVenda(
+	[cdvenda] [bigint] IDENTITY(1,1) NOT NULL, [dtvenda] [datetime] NOT NULL, [cdcliente] [bigint] NOT NULL, [nrano] [int] NOT NULL 
+	)on FG2013
+ALTER TABLE [dbo].HistoricoVenda ADD  CONSTRAINT [PK_vendaH] PRIMARY KEY CLUSTERED 
+(
+	[cdvenda] ASC,
+	[nrano] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON FG2012
+-- verificar a quantidade de registros 18891
+select count(*) from venda where $partition.pf_vendas(nrano) = 1
+
+alter table venda switch partition 1 to HistoricoVenda
+--Verificar a quantidade de registros
+select count(*) from venda where $partition.pf_vendas(nrano) = 1
+
+--Quantidade de registros na tabela de expurgo
+Select count(*) from HistoricoVenda
+
+
+drop table HistoricoVenda
+
+
