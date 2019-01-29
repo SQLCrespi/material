@@ -1,0 +1,22 @@
+###Scripts de uso comum
+
+#Lista || apaga diretórios vazios
+#testado no PS 5.1, Core 6.1 e 6.2
+function pega-diretoriovazio {
+      param(
+            [string]$diretorio="c:\"
+      )
+      $dir = Get-ChildItem $diretorio -Recurse
+      foreach($item in $dir)
+        {
+            if($item.psiscontainer)
+        {
+        $subdir = Get-ChildItem -Recurse -Path $item.FullName
+        if($subdir -eq $null)
+            {Write-Host "diret�rio vazio " + $item.FullName
+            #remove-item $item.fullname -force
+            }
+        }
+      }
+}
+
