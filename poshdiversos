@@ -13,7 +13,7 @@ function pega-diretoriovazio {
         {
         $subdir = Get-ChildItem -Recurse -Path $item.FullName
         if($subdir -eq $null)
-            {Write-Host "diret�rio vazio " + $item.FullName
+            {Write-Host "diretório vazio " + $item.FullName
             #remove-item $item.fullname -force
             }
         }
