@@ -1,0 +1,86 @@
+/*
+ Video 5 dicas basicas sobre o plano de execucao 
+ Criado 05 de abril de 2020
+ Rodrigo Crespi
+*/
+
+--Limpa o cache
+CHECKPOINT;
+DBCC DROPCLEANBUFFERS;
+DBCC FREEPROCCACHE;
+--usa o AdventureWorks para os exemplos
+USE AdventureWorks;
+GO
+
+/*
+ Primeiro: Sobre a leitura
+ A leitura deve ser feita da direita para esquerda e o foco serao operacoes de maior custo
+*/
+
+SELECT SalesOrderID, RevisionNumber, OrderDate, DueDate, ShipDate, Status,
+       OnlineOrderFlag, SalesOrderNumber, PurchaseOrderNumber, AccountNumber,
+       CustomerID, SalesPersonID, TerritoryID, BillToAddressID,
+       ShipToAddressID, ShipMethodID, CreditCardID, CreditCardApprovalCode,
+       CurrencyRateID, SubTotal, TaxAmt, Freight, TotalDue, Comment, rowguid,
+       ModifiedDate
+FROM [Sales].[SalesOrderHeader];
+
+/*
+ Se você estiver analisando uma query de multiplo statements sera gerado
+ dois resultados e seu respectivo custo pelo batch total. 
+*/
+SELECT * FROM [Sales].[SalesOrderHeader];
+GO
+SELECT * FROM [Sales].[SalesOrderHeader] ORDER BY OrderDate;
+
+/*
+ Segundo: Scans
+ Os scans sao operacoes que navegam por toda as linhas da tabela ou do indice e retornam a condicao satisfatoria da busca. ( o retorno do conjunto)
+
+	� O table scan contem linhas de uma tabela nao indexada, conhecida como heap table;
+	� Index scan procura por linhas no indice nao cluster;
+	� Clustered Index scan procura por linhas no indice cluster de uma tabela.
+
+Se houver alto consumo em scans esses podem ser resolvidos com indices apropriados ou a correcao das consultas, utilizar a clausula where para filtar o maximo possivel de registros pode ser uma boa solucao para alguns casos, tente remover hints ou ate mesmo se for possivel alterar o design da tabela 
+ 
+ */
+DROP TABLE IF EXISTS dbo.orderssemeestatistica;
+GO
+SELECT * INTO orderssemeestatistica FROM [Sales].[SalesOrderHeader];
+SELECT * FROM dbo.orderssemeestatistica;
+
+/*
+ Terceiro Seta muito grossa
+
+ As setas que ligam um operador a outro elas podem identificar a quantidade de linhas afetadas, quanto mais espessa maior a quantidade de registros.
+ E para saber a quantidade de linhas basta colocar o cursor sobre 
+
+ Um fato a ficar atento eh que quanto mais espessa a linha, mais registros e isso pode significar mais IO novamente, para evitar isso filtre o maximo possivel como a clausula where
+ */
+SELECT * FROM [HumanResources].[Employee];
+SELECT * FROM [Sales].[SalesOrderDetail];
+
+/*
+ Quarto Bookmark lookups
+
+ Este operador geralmente aparece em um conjunto de nonclustered index seek quando a consulta deve obeter algumas colunas que nao estao dentro dos indices nonclustered
+ Se este operador tiver um percentual alto verifique se um indice cluster ou nao cluster pode cobrir a coluna
+
+*/
+SELECT [SalesOrderID], [CarrierTrackingNumber], [OrderQty], [ProductID],
+       [UnitPrice], [ModifiedDate]
+FROM Sales.SalesOrderDetail
+WHERE [ModifiedDate]>'2014/06/29' AND [ProductID]=75084;
+
+/* 
+ Quinto Sorting
+
+ Um operador de sort ordena todas as linhas de entrada na ordem definida pela clausula order by.
+ Geralmente estes operadores apresentam uma taxa alta de I/O os operacoes, recomendo visualizar se isso nao esta causando gargalos no tempdb.
+
+ Se este operador aperecer diversas vezes para voce considere planejar a criacao de indices sobre a coluna vitima do order by.
+*/
+SELECT [SalesOrderID], [CarrierTrackingNumber], [OrderQty], [ProductID],
+       [UnitPrice], [ModifiedDate]
+FROM Sales.SalesOrderDetail
+ORDER BY ProductID;
