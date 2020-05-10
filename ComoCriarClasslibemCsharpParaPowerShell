@@ -1,0 +1,37 @@
+#Verifica a versão do .NET
+dotnet --version
+
+#Cria o projeto
+dotnet new classlib --name demox
+
+#define o SDK
+dotnet new globaljson 
+
+#Adiciona o PowerShell Standard Library
+#Fazer isso dentro do diretório do projeto
+dotnet add package PowerShellStandard.Library --version 5.1.1
+
+#Editar a Class1 com esse código
+
+using System;
+using System.Management.Automation;
+
+namespace clsdemox
+{
+    [Cmdlet(VerbsDiagnostic.Resolve, "TestaImpar")]
+    public class clstestavalor: PSCmdlet
+    {
+        [Parameter(Position =0)]
+        public Object InputObject { get; set; }
+
+        protected override void EndProcessing()
+        {
+            this.WriteObject(Convert.ToInt32(InputObject)%2 );
+            base.EndProcessing();
+        }
+    }
+}
+
+
+#faz o Build
+dotnet build
