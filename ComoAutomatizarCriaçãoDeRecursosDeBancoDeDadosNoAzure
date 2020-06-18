@@ -1,0 +1,220 @@
+<#
+  Criado em 18 de Maio de 2020 para o Descomplicando Azure
+  Autor: Rodrigo e Tiago Crespi
+  Título da Palestra: Como automatizar a criação de recursos de banco de dados no Azure
+#>
+
+<# Setup 
+    Todas as demos
+#>
+Import-Module Az -Force
+Connect-AzAccount
+# Seta a subscription correta
+Set-AzContext -Subscription 'SuaSubscription'
+# Dropa o RG DescomplicandoAzure
+Get-AzResourceGroup -Name 'DescomplicandoAzure'  |   Remove-AzResourceGroup -force -Confirm
+# Criação do Grupo de Recursos
+$localizacao = "brazilsouth"
+$ResourceGroupName = "DescomplicandoAzure"
+New-AzResourceGroup -Name $ResourceGroupName -Location $localizacao
+
+#Define as variáveis utilizadas nos exemplos abaixo
+$administratorLogin = 'useradm'
+$administratorLoginPassword = 'SenhaAdm123.'
+
+<# Demo 1
+    Cria a VM com o Template do Azure (Windows 2016 + SQL Server)
+#>
+
+#
+# Exibir no portal como gerar o template
+# Procurar o template = SQL Server 2017 on Windows Server 2016
+#
+
+#
+# Tempo de execução ~15 min | não executar on-line
+#
+# Versão máquina do Tiago  (Já foi criado e mostrar os json)
+New-AzResourceGroupDeployment -ResourceGroupName $ResourceGroupName  `
+    -TemplateFile "d:\DEscomplicandoAzure\vmSQL\template.json" `
+    -TemplateParameterFile "d:\DEscomplicandoAzure\vmSQL\parameters.json"
+
+
+# Versão máquina Rodrigo
+New-AzResourceGroupDeployment -Name $ResourceGroupName -ResourceGroupName $ResourceGroupName  `
+    -TemplateFile "/Users/sqlcrespi/Documents/Palestras/2020/06 - Descomplicando o Azure/Como automatizar a criação de recursos no Azure/DescomplicandoAzure/vmSQL/template.json" `
+    -TemplateParameterFile "/Users/sqlcrespi/Documents/Palestras/2020/06 - Descomplicando o Azure/Como automatizar a criação de recursos no Azure/DescomplicandoAzure/VmSQL/parameters.json"
+
+<# Demo 2
+    Cria o ambiente de VM com SQL Server utlizando comandos do PowerShell (Sem o Template)
+#>
+
+#
+# Tempo de execução ~6 min | não executar on-line
+#
+
+# Definição de variáveis
+$NomeVM = "VMSQL"
+$NomeSubnet = $NomeVM + "_subnet"
+$NomeVnet = $NomeVM + "_vnet"
+$NomeIPPublico = $NomeVM + "_IP"
+$NomeNSG = $NomeVM + "-nsg"
+$NomeInterface = $NomeVM + "_int"
+
+# Cria subnet
+$subnetconfig = New-AzVirtualNetworkSubnetConfig -name $NomeSubnet -AddressPrefix 192.168.1.0/24
+
+# Cria rede virtual
+$vnet = New-AzVirtualNetwork -ResourceGroupName $ResourceGroupName -Location $localizacao `
+    -Name $NomeVnet -AddressPrefix 192.168.0.0/16 -Subnet $subnetconfig 
+
+# Cria ip publico
+$PublicIP = New-AzPublicIpAddress -ResourceGroupName $ResourceGroupName -Location $localizacao `
+    -AllocationMethod Static -IdleTimeoutInMinutes 4 -Name $NomeIPPublico
+
+# Cria regras de RDP
+$RegraNsgRdp = New-AzNetworkSecurityRuleConfig -Name "RegraRDP" -Protocol Tcp `
+    -Direction Inbound -Priority 1000 -SourceAddressPrefix * -SourcePortRange * `
+    -DestinationAddressPrefix * -DestinationPortRange 3389 -Access Allow
+
+# Cria regras de SQL
+$RegraNsgSQL = New-AzNetworkSecurityRuleConfig -Name "RegraSQL" -Protocol Tcp `
+    -Direction Inbound -Priority 1001 -SourceAddressPrefix * -SourcePortRange * `
+    -DestinationAddressPrefix * -DestinationPortRange 1433 -Access Allow
+
+# Cria o NSG
+$nsg = New-AzNetworkSecurityGroup -ResourceGroupName $ResourceGroupName `
+    -Location $localizacao -name $NomeNSG -SecurityRules $RegraNsgRdp, $RegraNsgSQL
+
+# Cria interface de rede
+$Interface = New-AzNetworkInterface -name $NomeInterface -ResourceGroupName $ResourceGroupName `
+    -Location $localizacao -SubnetId $vnet.Subnets[0].id -PublicIpAddressId $PublicIP.Id `
+    -NetworkSecurityGroupId $nsg.Id
+
+# Define usuario e senha
+$Senha = ConvertTo-SecureString $administratorLoginPassword -asplaintext -force
+$credencial = New-Object System.Management.Automation.PSCredential ($administratorLogin, $Senha)
+
+# Cria VM
+$VM = New-AzVMConfig -VMName $NomeVM -VMSize Standard_B2ms | 
+Set-AzVMOperatingSystem -Windows -ComputerName $NomeVM -Credential $credencial -ProvisionVMAgent -EnableAutoUpdate |
+Set-AzVMSourceImage -PublisherName "MicrosoftSQLServer" -Offer "SQL2017-WS2016" -Skus "SQLDEV" -Version "latest" |
+Add-AzVMNetworkInterface -id $Interface.Id 
+
+New-AzVM -ResourceGroupName $ResourceGroupName -Location $localizacao -VM $VM
+ 
+# Mostar o Resultado da Criação
+Get-AzVM -ResourceGroupName $ResourceGroupName | Select-Object name, Location, ResourceGroupName | Format-Table -AutoSize
+
+# Mostar no Cloud Shell como funciona a automação por lá.
+
+
+<# Demo 3
+    Deploy do Azure SQL Database
+#>
+
+#
+#Tempo de execução ~8 min | não executar on-line
+#
+
+#Versão máquina do Tiago (mostrar o json de parametros)
+New-AzResourceGroupDeployment -Name $ResourceGroupName -ResourceGroupName $ResourceGroupName  `
+    -TemplateFile "D:\DescomplicandoAzure\SQLDatabase\template.json" `
+    -TemplateParameterFile "D:\DescomplicandoAzure\SQLDatabase\parameters.json"
+
+#Versão máquina do Rodrigo 
+New-AzResourceGroupDeployment -ResourceGroupName $ResourceGroupName  `
+    -TemplateFile '/Users/sqlcrespi/Documents/Palestras/2020/06 - Descomplicando o Azure/Como automatizar a criação de recursos no Azure/DescomplicandoAzure/SQLDatabase/template.json' `
+    -TemplateParameterFile '/Users/sqlcrespi/Documents/Palestras/2020/06 - Descomplicando o Azure/Como automatizar a criação de recursos no Azure/DescomplicandoAzure/SQLDatabase/parameters.json'
+
+#
+#Tempo de execução ~1 min
+#
+
+#Adiciona a regra ao firewall 
+$SQLServer = Get-AzSqlServer
+New-AzSqlServerFirewallRule -ResourceGroupName $SQLServer.ResourceGroupName `
+    -ServerName $SQLServer.ServerName -FirewallRuleName "RoleIpAll" `
+    -StartIpAddress "0.0.0.0" -EndIpAddress "255.255.255.0"
+
+<# Demo 4
+    Deploy do Azure SQL Database com comandos do PowerShell (Sem o Template)
+#>
+
+#
+# Tempo de execução ~2 min
+#
+
+#Define variáveis
+$NomeServidor = "srvdescomplicandoazure"
+$NomeSQL = "sqlescomplicandoazure"
+$IpInicio = "0.0.0.0"
+$ipFim = "255.255.255.0"
+
+# Cria credencial de conexão ao banco
+$credencial = New-Object -TypeName System.Management.Automation.PSCredential `
+    -ArgumentList $administratorLogin, $(ConvertTo-SecureString -String $administratorLoginPassword -AsPlainText -Force)
+    
+# Cria o servidor do Azure SQL Database
+$servidorSQL = New-AzSqlServer -ResourceGroupName $ResourceGroupName -ServerName $NomeServidor -Location $localizacao `
+    -SqlAdministratorCredentials $credencial
+$Firewall = New-AzSqlServerFirewallRule -ResourceGroupName $resourceGroupName `
+    -ServerName $NomeServidor -FirewallRuleName "AllowedIPs" -StartIpAddress $IpInicio -EndIpAddress $ipFim
+
+# Cria um banco de dados em banco
+$SqlDatabase = New-AzSqlDatabase -ResourceGroupName $ResourceGroupName -ServerName $NomeServidor `
+    -DatabaseName $NomeSQL -RequestedServiceObjectiveName "S0" 
+
+# Exibe o Azure SQL Database
+Get-AzSqlServer -ResourceGroupName $ResourceGroupName | Select-Object ServerName, ResourceGroupName | Format-Table -AutoSize
+Get-AzSqlDatabase -ResourceGroupName $ResourceGroupName  -ServerName $NomeServidor | Select-Object ServerName, DatabaseName, `
+  ElasticPoolName, DatabaseId, ResourceGroupName | Format-Table -AutoSize
+
+
+<# Demo 5 
+    Deploy do Elastic Pool
+#>
+
+#
+# Tempo de execução ~1 min
+#
+
+# Versão máquina Tiago (mostrar o json de parametros)
+New-AzResourceGroupDeployment -Name $ResourceGroupName -ResourceGroupName $ResourceGroupName  `
+    -TemplateFile "D:\DescomplicandoAzure\ElasticPool\template.json" `
+    -TemplateParameterFile "D:\DescomplicandoAzure\ElasticPool\parameters.json"
+
+# Versão máquina Rodrigo
+New-AzResourceGroupDeployment -Name $ResourceGroupName -ResourceGroupName $ResourceGroupName  `
+    -TemplateFile "/Users/sqlcrespi/Documents/Palestras/2020/06 - Descomplicando o Azure/Como automatizar a criação de recursos no Azure/DescomplicandoAzure/ElasticPool/template.json" `
+    -TemplateParameterFile "/Users/sqlcrespi/Documents/Palestras/2020/06 - Descomplicando o Azure/Como automatizar a criação de recursos no Azure/DescomplicandoAzure/ElasticPool/parameters.json"
+    
+<# Demo 6
+    Deploy do Elastic Pool com PowerShell (sem template)
+#>
+
+#
+#Tempo de execução ~2 min
+#
+
+
+# Variaveis 
+$NomeElasticPool = "ElasticDescomplicando"
+$NomeServidor = "srvdescomplicandoazure"
+$NomeSQL = "sqlescomplicandoazure"
+
+New-AzSqlElasticPool -ResourceGroupName $ResourceGroupName -ServerName $NomeServidor -ElasticPoolName `
+    $NomeElasticPool -Edition "Standard" -Dtu 50 -DatabaseDtuMin 10 -DatabaseDtuMax 20
+
+#Mostrar que a propriedade ElasticPoolName esta vazia
+Get-AzSqlDatabase -ResourceGroupName $ResourceGroupName  -ServerName $NomeServidor | Select-Object ServerName, DatabaseName, `
+    ElasticPoolName, DatabaseId, ResourceGroupName | Format-Table -AutoSize
+
+Set-AzSqlDatabase -ResourceGroupName $ResourceGroupName -DatabaseName $NomeSQL -ServerName $NomeServidor `
+    -ElasticPoolName $NomeElasticPool
+
+#Mostrar que a propriedade ElasticPoolName esta preenchida
+Get-AzSqlDatabase -ResourceGroupName $ResourceGroupName  -ServerName $NomeServidor | Select-Object ServerName, DatabaseName, `
+    ElasticPoolName, DatabaseId, ResourceGroupName | Format-Table -AutoSize
+  
+    
