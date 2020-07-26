@@ -1,0 +1,28 @@
+{
+    //"workbench.colorTheme": "PowerShell ISE",
+    "files.defaultLanguage": "powershell",
+    "workbench.colorTheme": "Visual Studio 2019 Dark",
+    "window.zoomLevel": 2,
+    "editor.formatOnSave": true,
+    "editor.formatOnType": true,
+    "editor.wordWrap": "on",
+    "editor.glyphMargin": true,
+    "editor.autoIndent": "full",
+    "editor.tabCompletion": "on",
+    // Terminal
+    "terminal.integrated.shell.osx": "/usr/local/microsoft/powershell/7/pwsh",
+    "terminal.integrated.automationShell.linux": "/bin/bash",
+    "terminal.integrated.automationShell.windows": "C:\\Program Files\\PowerShell\\7-preview>\\pwsh.exe",
+    "terminal.integrated.fontSize": 14,
+    // PowerShell
+    "powershell.scriptAnalysis.enable": true,
+    "powershell.startAutomatically": true,
+    "powershell.integratedConsole.focusConsoleOnExecute": false,
+    "powershell.enableProfileLoading": false,
+    "powershell.codeFormatting.openBraceOnSameLine": true,
+    //https://code.visualstudio.com/docs/getstarted/settings
+    // diretorio de destino
+    //Windows %APPDATA%\Code\User\settings.json
+    //macOS $HOME/Library/Application Support/Code/User/settings.json
+    //Linux $HOME/.config/Code/User/settings.json
+}
