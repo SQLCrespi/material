@@ -1,5 +1,5 @@
 {
-    //Editor
+    // Editor
     //"workbench.colorTheme": "PowerShell ISE",
     "workbench.colorTheme": "Visual Studio 2019 Dark",
     "files.defaultLanguage": "powershell",
