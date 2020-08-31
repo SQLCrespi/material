@@ -1,0 +1,54 @@
+###
+### TDCSP - Conteineres 
+### VM lxubuntu - ssh sqlcrespi@191.239.250.191
+###
+
+## Demo 1 - Criacao
+# SQL Server 2019 CU5 - Docker Hub https://hub.docker.com/_/microsoft-mssql-server
+docker pull mcr.microsoft.com/mssql/server:2019-CU5-ubuntu-16.04
+
+#rodando
+docker ps -a
+
+#imagem
+docker image ls
+
+## Volumes para dados persistentes
+docker volume ls
+
+docker volume create sqlvolume
+
+docker volume ls
+
+docker volume inspect sqlvolume
+#navegar no volume 
+
+## Demo 2 - criar um conteiner
+#Gestão de memória
+#--memory-reservation X
+#--memory="4g" 
+#--memory-swap="2g" 
+#Processador
+#--cpus="2.0"
+
+docker run  --name 'sql19' -e 'ACCEPT_EULA=Y' -e 'MSSQL_SA_PASSWORD=Senha123!'  --memory="4g" --memory-swap="2g" --cpus="2.0" -p 2433:1433 -v sqlvolume:/var/opt/mssql -d mcr.microsoft.com/mssql/server:2019-CU5-ubuntu-16.04
+
+docker stats
+
+#nao funciona
+docker run  --name 'sql19_1' -e 'ACCEPT_EULA=Y' -e 'MSSQL_SA_PASSWORD=Senha123!' -p 3433:1433 -v sqlvolume:/var/opt/mssql -d mcr.microsoft.com/mssql/server:2019-CU5-ubuntu-16.04
+
+#mapeamento
+docker run --name 'sql19_3' -e "ACCEPT_EULA=Y" -e 'MSSQL_SA_PASSWORD=Senha123!' -e "MSSQL_DATA_DIR=/tmp" -v /tmp:/var/opt/mssql -p 4433:1433 -d mcr.microsoft.com/mssql/server:2019-CU5-ubuntu-16.04
+
+
+# CU6
+docker pull mcr.microsoft.com/mssql/server:2019-CU6-ubuntu-16.04
+
+docker ps -a
+
+docker stop sql19_1
+
+docker rm sql19_1
+
+docker run  --name 'sql19_1' -e 'ACCEPT_EULA=Y' -e 'MSSQL_SA_PASSWORD=Senha123!' -p 3433:1433 -v sqlvolume:/var/opt/mssql -d mcr.microsoft.com/mssql/server:2019-CU6-ubuntu-16.04
