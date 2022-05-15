@@ -11,9 +11,12 @@
     "editor.autoIndent": "full",
     "editor.tabCompletion": "on",
     // Terminal
-    "terminal.integrated.shell.osx": "/usr/local/microsoft/powershell/7/pwsh",
-    "terminal.integrated.automationShell.linux": "/bin/bash",
-    "terminal.integrated.automationShell.windows": "C:\\Program Files\\PowerShell\\7-preview>\\pwsh.exe",
+    "terminal.integrated.profiles.osx": {
+        "pwsh": {
+            "path": "/usr/local/microsoft/powershell/7/pwsh",
+            "icon": "terminal-powershell"
+        }
+    },
     "terminal.integrated.fontSize": 14,
     // PowerShell
     "powershell.scriptAnalysis.enable": true,
