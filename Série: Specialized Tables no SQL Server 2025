@@ -16,6 +16,11 @@ GO
 CREATE DATABASE DP800_Lab;
 GO
 
+--
+-- Post #1
+-- Lab sobre in-memory table
+--
+
 USE DP800_Lab;
 GO
 
@@ -119,3 +124,11 @@ SELECT * FROM @ids;
 DROP PROCEDURE IF EXISTS dbo.usp_InserirPedido;
 DROP TABLE IF EXISTS dbo.Pedido, dbo.SessaoCache;
 -- O filegroup MEMORY_OPTIMIZED_DATA permanece no banco
+
+--
+-- Post #2
+-- Lab sobre Temporal Tables
+--
+-- EM BREVE
+
+
