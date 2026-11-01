@@ -1,0 +1,121 @@
+01 - Lab.sql
+
+-- Cria o banco de laboratório usado em todos os posts da série
+USE master;
+GO
+IF DB_ID('DP800_Lab') IS NOT NULL BEGIN
+ALTER DATABASE DP800_Lab
+SET
+  SINGLE_USER
+WITH
+  ROLLBACK IMMEDIATE;
+DROP DATABASE DP800_Lab;
+END
+GO
+
+CREATE DATABASE DP800_Lab;
+GO
+
+USE DP800_Lab;
+GO
+
+-- 1. Toda tabela memory-optimized exige um filegroup MEMORY_OPTIMIZED_DATA
+ALTER DATABASE DP800_Lab
+    ADD FILEGROUP FG_InMemory CONTAINS MEMORY_OPTIMIZED_DATA;
+GO
+
+-- Ajuste o caminho para uma pasta existente na sua máquina
+ALTER DATABASE DP800_Lab
+    ADD FILE (NAME = 'DP800_InMemory', FILENAME = '/var/opt/mssql/DP800_InMemory')
+    TO FILEGROUP FG_InMemory;
+GO
+
+-- 2. Tabela durável (SCHEMA_AND_DATA) com HASH index na PK
+CREATE TABLE dbo.Pedido
+(
+    PedidoId     INT IDENTITY(1,1) NOT NULL
+        PRIMARY KEY NONCLUSTERED HASH WITH (BUCKET_COUNT = 1048576),
+    ClienteId    INT          NOT NULL,
+    Valor        DECIMAL(10,2) NOT NULL,
+    DataPedido   DATETIME2    NOT NULL DEFAULT SYSUTCDATETIME(),
+
+    -- Índice Bw-tree para consultas por intervalo de data
+    INDEX IX_Pedido_Data NONCLUSTERED (DataPedido)
+)
+WITH (MEMORY_OPTIMIZED = ON, DURABILITY = SCHEMA_AND_DATA);
+GO
+
+-- 3. Tabela não durável (SCHEMA_ONLY): os dados somem no restart
+CREATE TABLE dbo.SessaoCache
+(
+    SessaoId   UNIQUEIDENTIFIER NOT NULL
+        PRIMARY KEY NONCLUSTERED HASH WITH (BUCKET_COUNT = 131072),
+    Payload    NVARCHAR(4000)   NULL,
+    ExpiraEm   DATETIME2        NOT NULL
+)
+WITH (MEMORY_OPTIMIZED = ON, DURABILITY = SCHEMA_ONLY);
+GO
+
+-- 4. Natively compiled stored procedure para inserir pedidos
+CREATE OR ALTER PROCEDURE dbo.usp_InserirPedido
+    @ClienteId INT,
+    @Valor     DECIMAL(10,2)
+WITH NATIVE_COMPILATION, SCHEMABINDING
+AS
+BEGIN ATOMIC WITH
+(
+    TRANSACTION ISOLATION LEVEL = SNAPSHOT,
+    LANGUAGE = N'us_english'
+)
+    INSERT INTO dbo.Pedido (ClienteId, Valor)
+    VALUES (@ClienteId, @Valor);
+END;
+GO
+
+-- 5. Carga de teste: 100 mil pedidos
+SET NOCOUNT ON;
+DECLARE @i INT = 1;
+WHILE @i <= 100000
+BEGIN
+    -- EXEC não aceita expressões nos parâmetros, por isso as variáveis
+    DECLARE @c INT = @i % 1000,
+            @v DECIMAL(10,2) = (@i % 500) + 0.99;
+    EXEC dbo.usp_InserirPedido @ClienteId = @c, @Valor = @v;
+    SET @i += 1;
+END;
+GO
+
+-- 6. Conferindo a saúde do HASH index (cadeias longas = BUCKET_COUNT baixo)
+SELECT  OBJECT_NAME(hs.object_id)  AS Tabela,
+        i.name                     AS Indice,
+        hs.total_bucket_count,
+        hs.empty_bucket_count,
+        hs.avg_chain_length,
+        hs.max_chain_length
+FROM sys.dm_db_xtp_hash_index_stats AS hs
+JOIN sys.indexes AS i
+    ON i.object_id = hs.object_id AND i.index_id = hs.index_id;
+
+-- 7. Quanto de memória cada tabela está usando
+SELECT  OBJECT_NAME(object_id) AS Tabela,
+        memory_allocated_for_table_kb,
+        memory_used_by_table_kb
+FROM sys.dm_db_xtp_table_memory_stats
+WHERE object_id > 0;
+
+-- Table type em memória: sem tempdb, sem contenção de alocação
+CREATE TYPE dbo.tt_ListaIds AS TABLE
+(
+    Id INT NOT NULL PRIMARY KEY NONCLUSTERED
+)
+WITH (MEMORY_OPTIMIZED = ON);
+GO
+
+DECLARE @ids dbo.tt_ListaIds;
+INSERT INTO @ids (Id) VALUES (1), (2), (3);
+SELECT * FROM @ids;
+
+-- Limpeza opcional desta parte
+DROP PROCEDURE IF EXISTS dbo.usp_InserirPedido;
+DROP TABLE IF EXISTS dbo.Pedido, dbo.SessaoCache;
+-- O filegroup MEMORY_OPTIMIZED_DATA permanece no banco
