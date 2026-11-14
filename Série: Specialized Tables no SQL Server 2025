@@ -127,8 +127,281 @@ DROP TABLE IF EXISTS dbo.Pedido, dbo.SessaoCache;
 
 --
 -- Post #2
--- Lab sobre Temporal Tables
+-- Specialized Tables no SQL Server 2025: Temporal Tables
 --
--- EM BREVE
+USE DP800_Lab;
+GO
 
+-- 1. Criando uma temporal table com history table nomeada
+CREATE TABLE dbo.Funcionario
+(
+    FuncionarioId  INT           NOT NULL PRIMARY KEY CLUSTERED,
+    Nome           NVARCHAR(100) NOT NULL,
+    Cargo          NVARCHAR(50)  NOT NULL,
+    Salario        DECIMAL(10,2) NOT NULL,
+
+    -- Colunas de período (HIDDEN = não aparecem no SELECT *)
+    ValidoDe   DATETIME2 GENERATED ALWAYS AS ROW START HIDDEN NOT NULL,
+    ValidoAte  DATETIME2 GENERATED ALWAYS AS ROW END   HIDDEN NOT NULL,
+    PERIOD FOR SYSTEM_TIME (ValidoDe, ValidoAte)
+)
+WITH
+(
+    SYSTEM_VERSIONING = ON
+    (
+        HISTORY_TABLE = dbo.FuncionarioHistorico,
+        HISTORY_RETENTION_PERIOD = 6 MONTHS  -- limpeza automática do histórico
+    )
+);
+GO
+
+-- 2. Gerando histórico: insert, updates e delete com pausas
+INSERT INTO dbo.Funcionario (FuncionarioId, Nome, Cargo, Salario)
+VALUES (1, N'Ana',   N'DBA Júnior', 5000),
+       (2, N'Bruno', N'Dev',        6000);
+
+WAITFOR DELAY '00:00:02';
+UPDATE dbo.Funcionario SET Cargo = N'DBA Pleno', Salario = 8000 WHERE FuncionarioId = 1;
+
+-- Guardando um "ponto no tempo" para usar no AS OF
+DECLARE @Marco DATETIME2 = SYSUTCDATETIME();
+SELECT @Marco AS MarcoUTC;
+
+WAITFOR DELAY '00:00:02';
+UPDATE dbo.Funcionario SET Cargo = N'DBA Sênior', Salario = 12000 WHERE FuncionarioId = 1;
+DELETE FROM dbo.Funcionario WHERE FuncionarioId = 2;
+
+-- 3. Estado atual (repare que o SELECT * não traz as colunas HIDDEN)
+SELECT * FROM dbo.Funcionario;
+
+-- 4. Como os dados estavam no momento do @Marco
+SELECT FuncionarioId, Nome, Cargo, Salario, ValidoDe, ValidoAte
+FROM dbo.Funcionario
+FOR SYSTEM_TIME AS OF @Marco;
+GO
+
+-- 5. Linha do tempo completa da Ana (atual + histórico)
+SELECT FuncionarioId, Nome, Cargo, Salario, ValidoDe, ValidoAte
+FROM dbo.Funcionario
+FOR SYSTEM_TIME ALL
+WHERE FuncionarioId = 1
+ORDER BY ValidoDe;
+
+-- 6. Recuperando um registro excluído por engano
+INSERT INTO dbo.Funcionario (FuncionarioId, Nome, Cargo, Salario)
+SELECT TOP (1) FuncionarioId, Nome, Cargo, Salario
+FROM dbo.FuncionarioHistorico
+WHERE FuncionarioId = 2
+ORDER BY ValidoAte DESC;
+
+-- Tabela comum, já em produção
+CREATE TABLE dbo.Produto
+(
+    ProdutoId INT           NOT NULL PRIMARY KEY,
+    Nome      NVARCHAR(100) NOT NULL,
+    Preco     DECIMAL(10,2) NOT NULL
+);
+GO
+
+-- Adiciona as colunas de período com DEFAULT para as linhas existentes
+ALTER TABLE dbo.Produto ADD
+    ValidoDe  DATETIME2 GENERATED ALWAYS AS ROW START HIDDEN NOT NULL
+        CONSTRAINT DF_Produto_ValidoDe DEFAULT SYSUTCDATETIME(),
+    ValidoAte DATETIME2 GENERATED ALWAYS AS ROW END HIDDEN NOT NULL
+        CONSTRAINT DF_Produto_ValidoAte DEFAULT CONVERT(DATETIME2, '9999-12-31 23:59:59.9999999'),
+    PERIOD FOR SYSTEM_TIME (ValidoDe, ValidoAte);
+GO
+
+-- Liga o versionamento
+ALTER TABLE dbo.Produto
+    SET (SYSTEM_VERSIONING = ON (HISTORY_TABLE = dbo.ProdutoHistorico));
+GO
+
+-- Para mudanças de schema mais pesadas: desliga, altera, religa
+ALTER TABLE dbo.Produto SET (SYSTEM_VERSIONING = OFF);
+-- ... alterações na tabela e na history table ...
+ALTER TABLE dbo.Produto
+    SET (SYSTEM_VERSIONING = ON (HISTORY_TABLE = dbo.ProdutoHistorico, DATA_CONSISTENCY_CHECK = ON));
+GO
+
+-- Limpeza opcional desta parte
+ALTER TABLE dbo.Funcionario SET (SYSTEM_VERSIONING = OFF);
+ALTER TABLE dbo.Produto     SET (SYSTEM_VERSIONING = OFF);
+DROP TABLE IF EXISTS dbo.Funcionario, dbo.FuncionarioHistorico,
+                     dbo.Produto, dbo.ProdutoHistorico;
+
+
+
+--
+-- 3 - Lab.sql
+-- Specialized Tables no SQL Server 2025: External Tables
+--
+
+USE master
+GO
+SELECT
+  @@Version AS versao,
+  SERVERPROPERTY('IsPolyBaseInstalled') AS PolyBase
+-- 1. Habilita o PolyBase na instância
+USE master;
+GO
+EXEC sp_configure 'polybase enabled', 1;
+RECONFIGURE;
+GO
+EXEC sp_configure 'allow polybase export', 1;
+RECONFIGURE;
+GO
+-- 2. Banco de origem simulando um sistema externo
+CREATE DATABASE DP800_Origem;
+GO
+USE DP800_Origem;
+GO
+CREATE TABLE dbo.Cliente
+(
+    ClienteId INT           NOT NULL PRIMARY KEY,
+    Nome      NVARCHAR(100) NOT NULL,
+    UF        CHAR(2)       NOT NULL
+);
+INSERT INTO dbo.Cliente VALUES
+    (1, N'Padaria do Zé', 'SP'),
+    (2, N'Mercado Sol',   'RJ'),
+    (3, N'CDB Data Solutions',      'RS');
+GO
+
+-- Login SQL que o PolyBase usará para ler a origem (troque a senha!)
+USE master;
+GO
+CREATE LOGIN polybase_leitor WITH PASSWORD = 'Troque@Esta#Senha2025';
+GO
+USE DP800_Origem;
+GO
+CREATE USER polybase_leitor FOR LOGIN polybase_leitor;
+ALTER ROLE db_datareader ADD MEMBER polybase_leitor;
+GO
+-- 3. No banco de laboratório: master key + credential
+USE DP800_Lab;
+GO
+CREATE MASTER KEY ENCRYPTION BY PASSWORD = 'Master@Key#DP800!';
+GO
+CREATE DATABASE SCOPED CREDENTIAL cred_Origem
+WITH IDENTITY = 'polybase_leitor', SECRET = 'Troque@Esta#Senha2025';
+GO
+-- 4. External data source (TrustServerCertificate por causa do certificado autoassinado)
+CREATE EXTERNAL DATA SOURCE ds_SqlOrigem
+WITH
+(
+    LOCATION           = 'sqlserver://localhost',
+    PUSHDOWN           = ON,
+    CREDENTIAL         = cred_Origem,
+    CONNECTION_OPTIONS = 'TrustServerCertificate=Yes'
+);
+GO
+
+-- 5. External table: o schema precisa bater com a origem
+CREATE EXTERNAL TABLE dbo.ext_Cliente
+(
+    ClienteId INT           NOT NULL,
+    Nome      NVARCHAR(100) NOT NULL,
+    UF        CHAR(2)       NOT NULL
+)
+WITH
+(
+    LOCATION    = 'DP800_Origem.dbo.Cliente',  -- banco.schema.tabela
+    DATA_SOURCE = ds_SqlOrigem
+);
+GO
+-- 6. Consultando como se fosse local (inclusive com JOIN em tabela local)
+SELECT * FROM dbo.ext_Cliente WHERE UF = 'RS';
+-- Cria estatística para ajudar o otimizador na external table
+CREATE STATISTICS st_ext_Cliente_UF ON dbo.ext_Cliente (UF) WITH FULLSCAN;
+
+-- 7. Metadados do que foi criado
+SELECT name, location, pushdown FROM sys.external_data_sources;
+SELECT name, location            FROM sys.external_tables;
+
+
+-- Criar o Blob Storage
+-- Mão na massa: arquivos Parquet e CSV no storage
+/* =====================================================
+   Lab 3.2 – Parquet no Azure Blob (CETAS + leitura)
+   Pré-requisito: Lab 3.1 concluído (ext_Cliente)
+   ===================================================== */
+USE DP800_Lab;
+GO
+
+-- 0. Database master key (necessária para a credential)
+IF NOT EXISTS (SELECT 1 FROM sys.symmetric_keys WHERE name = '##MS_DatabaseMasterKey##')
+    CREATE MASTER KEY ENCRYPTION BY PASSWORD = '<SenhaForte#2026>';
+GO
+
+-- 1. Credential (SAS sem o "?" inicial; sp=rwdlc, srt=co ou sco)
+IF NOT EXISTS (SELECT 1 FROM sys.database_scoped_credentials WHERE name = 'cred_Blob')
+    CREATE DATABASE SCOPED CREDENTIAL cred_Blob
+    WITH IDENTITY = 'SHARED ACCESS SIGNATURE',
+         SECRET   = '<SAS-token-sem-o-?>';
+GO
+
+-- 2. Data source (container@storageaccount, sem pasta)
+IF NOT EXISTS (SELECT 1 FROM sys.external_data_sources WHERE name = 'ds_Blob')
+    CREATE EXTERNAL DATA SOURCE ds_Blob
+    WITH (LOCATION = 'abs://dp800@<storageaccount>.blob.core.windows.net',
+          CREDENTIAL = cred_Blob);
+GO
+
+-- 3. File format
+IF NOT EXISTS (SELECT 1 FROM sys.external_file_formats WHERE name = 'ff_Parquet')
+    CREATE EXTERNAL FILE FORMAT ff_Parquet WITH (FORMAT_TYPE = PARQUET);
+GO
+
+-- 4. Dados locais de origem
+DROP TABLE IF EXISTS dbo.VendaLocal;
+CREATE TABLE dbo.VendaLocal (VendaId INT, ClienteId INT, Valor DECIMAL(10,2), DataVenda DATE);
+INSERT INTO dbo.VendaLocal
+SELECT TOP (1000)
+       ROW_NUMBER() OVER (ORDER BY (SELECT 1)),
+       ABS(CHECKSUM(NEWID())) % 3 + 1,
+       ABS(CHECKSUM(NEWID())) % 500 + 0.99,
+       DATEADD(DAY, ABS(CHECKSUM(NEWID())) % 365, '2025-01-01')
+FROM sys.all_objects;
+GO
+
+-- 5. Habilitar exportação (CETAS)
+EXEC sp_configure 'allow polybase export', 1;
+RECONFIGURE;
+GO
+
+-- 6. CETAS: grava Parquet no Blob (esperado: 1000 rows affected)
+CREATE EXTERNAL TABLE dbo.ext_VendasExport
+WITH (LOCATION = 'vendas/2025/', DATA_SOURCE = ds_Blob, FILE_FORMAT = ff_Parquet)
+AS SELECT * FROM dbo.VendaLocal;
+GO
+
+-- 7. Leitura ad hoc (schema inferido)
+SELECT TOP (10) *
+FROM OPENROWSET(BULK 'vendas/2025/*.parquet',
+                DATA_SOURCE = 'ds_Blob',
+                FORMAT = 'PARQUET') AS v;
+GO
+
+-- 8. External table para uso recorrente
+CREATE EXTERNAL TABLE dbo.ext_Vendas
+(VendaId INT, ClienteId INT, Valor DECIMAL(10,2), DataVenda DATE)
+WITH (LOCATION = 'vendas/2025/', DATA_SOURCE = ds_Blob, FILE_FORMAT = ff_Parquet);
+GO
+
+-- 9. JOIN: Parquet (Blob) x SQL Server (loopback)
+SELECT c.Nome, c.UF, COUNT(*) AS Qtde, SUM(v.Valor) AS Total
+FROM dbo.ext_Vendas  AS v
+JOIN dbo.ext_Cliente AS c ON c.ClienteId = v.ClienteId
+GROUP BY c.Nome, c.UF
+ORDER BY Total DESC;
+GO
+
+USE DP800_Lab;
+DROP EXTERNAL TABLE IF EXISTS dbo.ext_Cliente;
+DROP EXTERNAL DATA SOURCE ds_SqlOrigem;
+DROP DATABASE SCOPED CREDENTIAL cred_Origem;
+USE master;
+DROP DATABASE IF EXISTS DP800_Origem;
+DROP LOGIN polybase_leitor;
 
