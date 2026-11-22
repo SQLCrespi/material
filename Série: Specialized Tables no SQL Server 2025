@@ -405,3 +405,100 @@ USE master;
 DROP DATABASE IF EXISTS DP800_Origem;
 DROP LOGIN polybase_leitor;
 
+
+--
+-- 4 - Lab.sql
+-- Specialized Tables no SQL Server 2025: Ledger
+--
+
+USE DP800_Lab;
+GO
+
+-- A verificação do ledger exige snapshot isolation habilitado no banco
+ALTER DATABASE DP800_Lab SET ALLOW_SNAPSHOT_ISOLATION ON;
+GO
+
+-- 1. Updatable ledger table: saldo de contas
+CREATE TABLE dbo.ContaSaldo
+(
+    ContaId  INT           NOT NULL PRIMARY KEY,
+    Titular  NVARCHAR(100) NOT NULL,
+    Saldo    DECIMAL(12,2) NOT NULL
+)
+WITH
+(
+    SYSTEM_VERSIONING = ON (HISTORY_TABLE = dbo.ContaSaldoHistorico),
+    LEDGER = ON
+);
+GO
+
+-- 2. Append-only ledger table: trilha de auditoria
+CREATE TABLE dbo.LogAcesso
+(
+    Usuario   SYSNAME      NOT NULL DEFAULT SUSER_SNAME(),
+    Acao      NVARCHAR(50) NOT NULL,
+    DataHora  DATETIME2    NOT NULL DEFAULT SYSUTCDATETIME()
+)
+WITH (LEDGER = ON (APPEND_ONLY = ON));
+GO
+
+-- 3. Movimentando dados
+INSERT INTO dbo.ContaSaldo VALUES (1, N'Ana', 1000), (2, N'Bruno', 500);
+UPDATE dbo.ContaSaldo SET Saldo = Saldo - 200 WHERE ContaId = 1;
+UPDATE dbo.ContaSaldo SET Saldo = Saldo + 200 WHERE ContaId = 2;
+DELETE FROM dbo.ContaSaldo WHERE ContaId = 2;
+
+INSERT INTO dbo.LogAcesso (Acao) VALUES (N'LOGIN'), (N'CONSULTA_SALDO');
+GO
+
+-- 4. Append-only não aceita UPDATE: este comando gera erro (é o esperado)
+BEGIN TRY
+    UPDATE dbo.LogAcesso SET Acao = N'ADULTERADO';
+END TRY
+BEGIN CATCH
+    SELECT ERROR_NUMBER() AS Erro, ERROR_MESSAGE() AS Mensagem;
+END CATCH;
+GO
+
+-- 5. As colunas ocultas aparecem quando nomeadas explicitamente
+SELECT ContaId, Titular, Saldo,
+       ledger_start_transaction_id,
+       ledger_start_sequence_number
+FROM dbo.ContaSaldo;
+
+-- 6. A ledger view mostra cada operação (INSERT/DELETE) com a transação que a fez
+SELECT *
+FROM dbo.ContaSaldo_Ledger
+ORDER BY ledger_transaction_id, ledger_sequence_number;
+
+-- 7. Quem fez cada transação e quando
+SELECT t.transaction_id, t.commit_time, t.principal_name, t.table_hashes
+FROM sys.database_ledger_transactions AS t
+ORDER BY t.commit_time;
+
+-- Tabelas ledger do banco e seus tipos
+SELECT name, ledger_type_desc, ledger_view_id
+FROM sys.tables
+WHERE ledger_type <> 0;
+GO
+
+-- 8. Gerando o digest e verificando a integridade
+CREATE TABLE #Digest (latest_digest NVARCHAR(MAX));
+INSERT INTO #Digest EXEC sys.sp_generate_database_ledger_digest;
+
+DECLARE @digest NVARCHAR(MAX) = (SELECT latest_digest FROM #Digest);
+SELECT @digest AS DigestJSON;   -- em produção, guarde este JSON fora do banco
+
+-- Retorna sucesso se nada foi adulterado; erro se houver inconsistência
+EXEC sys.sp_verify_database_ledger @digest;
+DROP TABLE #Digest;
+GO
+
+--Em produção, em vez de gerar o digst manualmente, configure o armazenamento automático.
+-- Envia o digest automaticamente para um container imutável (exemplo)
+ALTER DATABASE SCOPED CONFIGURATION
+    SET LEDGER_DIGEST_STORAGE_ENDPOINT = 'https://<conta>.blob.core.windows.net';
+
+-- Verificação usando todos os digests armazenados automaticamente
+EXEC sys.sp_verify_database_ledger_from_digest_storage;
+
