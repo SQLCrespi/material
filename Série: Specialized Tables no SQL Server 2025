@@ -502,3 +502,112 @@ ALTER DATABASE SCOPED CONFIGURATION
 -- Verificação usando todos os digests armazenados automaticamente
 EXEC sys.sp_verify_database_ledger_from_digest_storage;
 
+--
+-- 5 - Graph Tables (Final)
+-- Specialized Tables no SQL Server 2025: Graph Tables
+--
+
+USE DP800_Lab
+
+GO
+
+-- 1. Nós: pessoas e cidades
+CREATE TABLE dbo.Pessoa (
+  PessoaId INT NOT NULL PRIMARY KEY,
+  Nome NVARCHAR(50) NOT NULL
+) AS NODE;
+
+CREATE TABLE dbo.Cidade (
+  CidadeId INT NOT NULL PRIMARY KEY,
+  Nome NVARCHAR(50) NOT NULL
+) AS NODE;
+
+GO
+
+-- 2. Arestas: "segue" (pessoa → pessoa) e "mora em" (pessoa → cidade)
+CREATE TABLE dbo.Segue
+(
+    Desde DATE NOT NULL DEFAULT GETDATE(),
+    -- Edge constraint: Segue só pode ligar Pessoa a Pessoa
+    CONSTRAINT EC_Segue CONNECTION (dbo.Pessoa TO dbo.Pessoa) ON DELETE CASCADE
+) AS EDGE;
+
+CREATE TABLE dbo.MoraEm
+(
+    CONSTRAINT EC_MoraEm CONNECTION (dbo.Pessoa TO dbo.Cidade)
+) AS EDGE;
+GO
+
+-- 3. Populando os nós
+INSERT INTO dbo.Pessoa (PessoaId, Nome) VALUES
+    (1, N'Ana'), (2, N'Bruno'), (3, N'Carla'), (4, N'Diego'), (5, N'Eva');
+
+INSERT INTO dbo.Cidade (CidadeId, Nome) VALUES
+    (1, N'São Paulo'), (2, N'Farroupilha');
+GO
+
+-- 4. Populando as arestas: $from_id e $to_id recebem o $node_id dos nós
+-- Padrão prático: uma lista de pares (origem, destino) e um JOIN com os nós
+INSERT INTO dbo.Segue ($from_id, $to_id)
+SELECT o.$node_id, d.$node_id
+FROM (VALUES (N'Ana',   N'Bruno'),
+             (N'Bruno', N'Carla'),
+             (N'Carla', N'Diego'),
+             (N'Diego', N'Eva'),
+             (N'Ana',   N'Carla')) AS p (Origem, Destino)
+JOIN dbo.Pessoa AS o ON o.Nome = p.Origem
+JOIN dbo.Pessoa AS d ON d.Nome = p.Destino;
+
+INSERT INTO dbo.MoraEm ($from_id, $to_id)
+SELECT pe.$node_id, c.$node_id
+FROM (VALUES (N'Ana', N'São Paulo'),   (N'Bruno', N'Farroupilha'),
+             (N'Carla', N'São Paulo'), (N'Diego', N'Farroupilha '),
+             (N'Eva', N'São Paulo')) AS m (Pessoa, Cidade)
+JOIN dbo.Pessoa AS pe ON pe.Nome = m.Pessoa
+JOIN dbo.Cidade AS c  ON c.Nome  = m.Cidade;
+GO
+
+-- 5. Quem a Ana segue? (sintaxe ASCII-art do MATCH)
+SELECT p2.Nome AS Segue
+FROM dbo.Pessoa AS p1, dbo.Segue AS s, dbo.Pessoa AS p2
+WHERE MATCH(p1-(s)->p2)
+  AND p1.Nome = N'Ana';
+
+-- 6. Amigos dos amigos da Ana que moram em São Paulo
+SELECT DISTINCT p3.Nome AS AmigoDoAmigo
+FROM dbo.Pessoa AS p1, dbo.Segue AS s1, dbo.Pessoa AS p2,
+     dbo.Segue  AS s2, dbo.Pessoa AS p3,
+     dbo.MoraEm AS m,  dbo.Cidade AS c
+WHERE MATCH(p1-(s1)->p2-(s2)->p3-(m)->c)
+  AND p1.Nome = N'Ana'
+  AND c.Nome  = N'São Paulo';
+
+-- 7. SHORTEST_PATH: menor caminho da Ana até cada pessoa alcançável
+SELECT  p1.Nome AS Origem,
+        STRING_AGG(p2.Nome, ' -> ') WITHIN GROUP (GRAPH PATH) AS Caminho,
+        LAST_VALUE(p2.Nome)        WITHIN GROUP (GRAPH PATH) AS Destino,
+        COUNT(p2.Nome)             WITHIN GROUP (GRAPH PATH) AS Saltos
+FROM    dbo.Pessoa AS p1,
+        dbo.Segue  FOR PATH AS s,
+        dbo.Pessoa FOR PATH AS p2
+WHERE MATCH(SHORTEST_PATH(p1(-(s)->p2)+))
+  AND p1.Nome = N'Ana';
+
+-- 8. Mesmo caminho, mas limitado a no máximo 2 saltos
+SELECT  LAST_VALUE(p2.Nome) WITHIN GROUP (GRAPH PATH) AS Destino,
+        COUNT(p2.Nome)      WITHIN GROUP (GRAPH PATH) AS Saltos
+FROM    dbo.Pessoa AS p1,
+        dbo.Segue  FOR PATH AS s,
+        dbo.Pessoa FOR PATH AS p2
+WHERE MATCH(SHORTEST_PATH(p1(-(s)->p2){1,2}))
+  AND p1.Nome = N'Ana';
+
+-- 9. Por baixo dos panos: $node_id é um JSON com schema, tabela e id
+SELECT $node_id, PessoaId, Nome FROM dbo.Pessoa;
+
+-- Limpeza final da série
+USE master;
+GO
+ALTER DATABASE DP800_Lab SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+DROP DATABASE DP800_Lab;
+
